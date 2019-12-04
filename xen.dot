@@ -1,0 +1,158 @@
+/*
+ * Author:        Sergey Kovalev
+ * Last modified: 04.12.2019
+ * Agenda:        Call-graph representation of Xen
+ * Relates to:    f19af2f1138e89bdf05e8cfcab26a190e3771c4b
+ * Keywords:      Xen, call-graph, graphviz
+ */
+
+digraph {
+    subgraph cluster_xen {
+        label="xen/"
+
+        subgraph cluster_arch {
+            label="arch/"
+
+            subgraph cluster_x86 {
+                label="x86/"
+
+                subgraph cluster_hvm {
+                    label="hvm/"
+
+                    subgraph cluster_hypercall_c {
+                        label="hypercall.c"
+
+                        hvm_hypercall_table[shape="rect"]
+                        hvm_hypercall -> hvm_hypercall_table[style="dotted"]
+                    } // hypercall_c
+
+                    subgraph hvm_c {
+                        hvm_toggle_singlestep
+                    }
+
+                    subgraph monitor_c {
+                        hvm_monitor_debug
+                    } // monitor_c
+
+                    subgraph cluster_vmx {
+                        label="vmx/"
+
+                        subgraph entry_s {
+                            vmx_asm_vmexit_handler
+                        } // entry_s
+
+                        subgraph vmcs_c {
+                            vmx_create_vmcs
+                            construct_vmcs[color="gray"]
+                        } // vmcs_c
+
+                        subgraph vmx_c {
+                            vmx_vmexit_handler
+                        } // vmx_c
+
+                        vmx_create_vmcs -> construct_vmcs
+                        construct_vmcs -> vmx_asm_vmexit_handler[style="dotted", label="VMCS.HOST_RIP"]
+                        vmx_asm_vmexit_handler -> vmx_vmexit_handler
+                    } // vmx
+
+                    vmx_vmexit_handler -> hvm_monitor_debug[label="debug exception"]
+                    vmx_vmexit_handler -> hvm_monitor_debug[label="software breakpoint"]
+                    vmx_vmexit_handler -> hvm_monitor_debug[label="singlestep breakpoint"]
+                    vmx_vmexit_handler -> hvm_hypercall
+                } // hvm
+
+                subgraph cluster_mm {
+                    label="mm/"
+
+                    subgraph p2m_c {
+                        p2m_altp2m_check // More about altp2m at [1]
+                        p2m_switch_vcpu_altp2m_by_id
+
+                        p2m_altp2m_check -> p2m_switch_vcpu_altp2m_by_id
+                    } // p2m_c
+                } // mm
+
+                subgraph cluster_vm_event_c {
+                    label="vm_event.c"
+
+                    vm_event_toggle_singlestep -> hvm_toggle_singlestep
+                }
+
+                hvm_monitor_debug -> vm_event_toggle_singlestep[color="red"]
+                hvm_monitor_debug -> p2m_altp2m_check[color="red"]
+            } // x86
+        } // arch
+
+        subgraph cluster_common {
+            label="common/"
+
+            subgraph domctl_c {
+                do_domctl -> vm_event_domctl[label="XEN_DOMCTL_vm_event_op"]
+            } // domctl_c
+
+            subgraph vm_event_c {
+                vm_event_domctl
+                vm_event_resume[color="gray"]
+
+                vm_event_domctl -> vm_event_resume
+                vm_event_resume -> p2m_altp2m_check
+            } // vm_event_c
+        } // common
+
+        hvm_hypercall_table -> do_domctl[style="dotted", label="HYPERCALL(domctl)"]
+    } // xen
+
+    subgraph cluster_tools {
+        subgraph cluster_libs {
+            label="libs"
+
+            subgraph call {
+                subgraph core_c {
+                    xencall0 -> osdep_hypercall
+                    xencall1 -> osdep_hypercall
+                    xencall2 -> osdep_hypercall
+                    xencall3 -> osdep_hypercall
+                    xencall4 -> osdep_hypercall
+                    xencall5 -> osdep_hypercall
+                }
+
+                subgraph linux_c {
+                    osdep_hypercall -> ioctl
+                }
+            }
+        } // libs
+
+        subgraph cluster_libxc {
+            label="libxc"
+
+            subgraph xc_private_h {
+                do_domctl_ -> do_domctl_maybe_retry_efault
+                do_domctl_maybe_retry_efault -> xencall1[label="__HYPERVISOR_domctl"]
+            } // xc_private_h
+        } // libxc
+    } // tools
+
+    subgraph cluster_legend {
+        label="Legend"
+ 
+        static_function[label="static function", color="gray"]
+        data_structure[label="data structure", shape="rect"]
+
+        a[style="invis"]        
+        b[style="invis"]        
+        c[style="invis"]        
+        d[style="invis"]        
+        e[style="invis"]        
+        f[style="invis"]        
+
+        a -> b
+        c -> d[label="indirect call", style="dashed"]
+        e -> f[color="red", label="my experiments"]
+        1 -> 2[label="1 uses address of 2", style="dotted"]
+    } // legend
+}
+
+/*
+ * Resources:
+ * 1. STEALTHY MONITORING WITH XEN ALTP2M - https://xenproject.org/2016/04/13/stealthy-monitoring-with-xen-altp2m/
+ */
