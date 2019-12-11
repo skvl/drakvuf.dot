@@ -1,6 +1,6 @@
 /*
  * Author:        Sergey Kovalev
- * Last modified: 04.12.2019
+ * Last modified: 11.12.2019
  * Agenda:        Call-graph representation of Xen
  * Relates to:    f19af2f1138e89bdf05e8cfcab26a190e3771c4b
  * Keywords:      Xen, call-graph, graphviz
@@ -10,127 +10,255 @@ digraph {
     subgraph cluster_xen {
         label="xen/"
 
-        subgraph cluster_arch {
-            label="arch/"
+        subgraph cluster_xen {
+            label="xen/"
 
-            subgraph cluster_x86 {
-                label="x86/"
+            subgraph cluster_arch {
+                label="arch/"
 
-                subgraph cluster_hvm {
-                    label="hvm/"
+                subgraph cluster_x86 {
+                    label="x86/"
 
-                    subgraph cluster_hypercall_c {
-                        label="hypercall.c"
+                    subgraph cluster_hvm {
+                        label="hvm/"
 
-                        hvm_hypercall_table[shape="rect"]
-                        hvm_hypercall -> hvm_hypercall_table[style="dotted"]
-                    } // hypercall_c
+                        subgraph cluster_hypercall_c {
+                            label="hypercall.c"
 
-                    subgraph hvm_c {
-                        hvm_toggle_singlestep
+                            hvm_hypercall_table[shape="rect"]
+                            hvm_hypercall -> hvm_hypercall_table[style="dotted"]
+                        } // hypercall_c
+
+                        subgraph hvm_c {
+                            hvm_toggle_singlestep[tooltip="
+Toggle the value of 'struct vcpu.arch.hvm.single_step'.
+                            "]
+                        }
+
+                        subgraph monitor_c {
+                            hvm_monitor_debug
+                        } // monitor_c
+
+                        subgraph cluster_vmx {
+                            label="vmx/"
+
+                            subgraph entry_s {
+                                vmx_asm_vmexit_handler
+                            } // entry_s
+
+                            subgraph vmcs_c {
+                                vmx_create_vmcs
+                                construct_vmcs[color="gray"]
+                            } // vmcs_c
+
+                            subgraph vmx_c {
+                                vmx_vmexit_handler
+                            } // vmx_c
+
+                            vmx_create_vmcs -> construct_vmcs
+                            construct_vmcs -> vmx_asm_vmexit_handler[style="dotted", label="VMCS.HOST_RIP"]
+                            vmx_asm_vmexit_handler -> vmx_vmexit_handler
+                        } // vmx
+
+                        vmx_vmexit_handler -> hvm_monitor_debug[label="debug exception"]
+                        vmx_vmexit_handler -> hvm_monitor_debug[label="software breakpoint"]
+                        vmx_vmexit_handler -> hvm_monitor_debug[label="singlestep breakpoint"]
+                        vmx_vmexit_handler -> hvm_hypercall
+                    } // hvm
+
+                    subgraph cluster_mm {
+                        label="mm/"
+
+                        subgraph p2m_c {
+                            p2m_altp2m_check // More about altp2m at [1]
+                            p2m_switch_vcpu_altp2m_by_id
+
+                            p2m_altp2m_check -> p2m_switch_vcpu_altp2m_by_id
+                        } // p2m_c
+                    } // mm
+
+                    subgraph cluster_vm_event_c {
+                        label="vm_event.c"
+
+                        vm_event_toggle_singlestep -> hvm_toggle_singlestep
                     }
 
-                    subgraph monitor_c {
-                        hvm_monitor_debug
-                    } // monitor_c
+                    hvm_monitor_debug -> vm_event_toggle_singlestep[color="red"]
+                    hvm_monitor_debug -> p2m_altp2m_check[color="red"]
+                } // x86
+            } // arch
 
-                    subgraph cluster_vmx {
-                        label="vmx/"
+            subgraph cluster_common {
+                label="common/"
 
-                        subgraph entry_s {
-                            vmx_asm_vmexit_handler
-                        } // entry_s
-
-                        subgraph vmcs_c {
-                            vmx_create_vmcs
-                            construct_vmcs[color="gray"]
-                        } // vmcs_c
-
-                        subgraph vmx_c {
-                            vmx_vmexit_handler
-                        } // vmx_c
-
-                        vmx_create_vmcs -> construct_vmcs
-                        construct_vmcs -> vmx_asm_vmexit_handler[style="dotted", label="VMCS.HOST_RIP"]
-                        vmx_asm_vmexit_handler -> vmx_vmexit_handler
-                    } // vmx
-
-                    vmx_vmexit_handler -> hvm_monitor_debug[label="debug exception"]
-                    vmx_vmexit_handler -> hvm_monitor_debug[label="software breakpoint"]
-                    vmx_vmexit_handler -> hvm_monitor_debug[label="singlestep breakpoint"]
-                    vmx_vmexit_handler -> hvm_hypercall
-                } // hvm
-
-                subgraph cluster_mm {
-                    label="mm/"
-
-                    subgraph p2m_c {
-                        p2m_altp2m_check // More about altp2m at [1]
-                        p2m_switch_vcpu_altp2m_by_id
-
-                        p2m_altp2m_check -> p2m_switch_vcpu_altp2m_by_id
-                    } // p2m_c
-                } // mm
+                subgraph domctl_c {
+                    do_domctl -> vm_event_domctl[label="XEN_DOMCTL_vm_event_op"]
+                } // domctl_c
 
                 subgraph cluster_vm_event_c {
                     label="vm_event.c"
 
-                    vm_event_toggle_singlestep -> hvm_toggle_singlestep
+                    vm_event_domctl
+                    vm_event_resume[color="gray"]
+
+                    vm_event_domctl -> vm_event_resume
+                    vm_event_resume -> vm_event_toggle_singlestep
+                    vm_event_resume -> p2m_altp2m_check
+                } // vm_event_c
+            } // common
+
+            subgraph cluster_include {
+                label="include/"
+
+                subgraph cluster_public {
+                    label="public/"
+
+                    subgraph cluster_io {
+                        label="io/"
+
+                        subgraph cluster_ring_h {
+                            label="ring.h"
+
+                            ring_get_request[label="RING_GET_REQUEST"]
+                            ring_get_response[label="RING_GET_RESPONSE"]
+                            ring_push_responses[label="RING_PUSH_RESPONSES"]
+                        } // ring_h
+                    } // io
+                } // public
+            } // include
+
+            hvm_hypercall_table -> do_domctl[style="dotted", label="HYPERCALL(domctl)"]
+        } // xen
+
+        subgraph cluster_tools {
+            subgraph cluster_libs {
+                label="libs"
+
+                subgraph call {
+                    subgraph core_c {
+                        xencall0 -> osdep_hypercall
+                        xencall1 -> osdep_hypercall
+                        xencall2 -> osdep_hypercall
+                        xencall3 -> osdep_hypercall
+                        xencall4 -> osdep_hypercall
+                        xencall5 -> osdep_hypercall
+                    }
+
+                    subgraph linux_c {
+                        osdep_hypercall
+                    }
                 }
+            } // libs
 
-                hvm_monitor_debug -> vm_event_toggle_singlestep[color="red"]
-                hvm_monitor_debug -> p2m_altp2m_check[color="red"]
-            } // x86
-        } // arch
+            subgraph cluster_libxc {
+                label="libxc"
 
-        subgraph cluster_common {
-            label="common/"
-
-            subgraph domctl_c {
-                do_domctl -> vm_event_domctl[label="XEN_DOMCTL_vm_event_op"]
-            } // domctl_c
-
-            subgraph vm_event_c {
-                vm_event_domctl
-                vm_event_resume[color="gray"]
-
-                vm_event_domctl -> vm_event_resume
-                vm_event_resume -> p2m_altp2m_check
-            } // vm_event_c
-        } // common
-
-        hvm_hypercall_table -> do_domctl[style="dotted", label="HYPERCALL(domctl)"]
+                subgraph xc_private_h {
+                    do_domctl_[label="do_domctl"]
+                    do_domctl_ -> do_domctl_maybe_retry_efault
+                    do_domctl_maybe_retry_efault -> xencall1[label="__HYPERVISOR_domctl"]
+                } // xc_private_h
+            } // libxc
+        } // tools
     } // xen
 
-    subgraph cluster_tools {
-        subgraph cluster_libs {
-            label="libs"
+    osdep_hypercall -> ioctl
+    ioctl -> vmx_asm_vmexit_handler[label="hypercall", style="dotted"]
 
-            subgraph call {
-                subgraph core_c {
-                    xencall0 -> osdep_hypercall
-                    xencall1 -> osdep_hypercall
-                    xencall2 -> osdep_hypercall
-                    xencall3 -> osdep_hypercall
-                    xencall4 -> osdep_hypercall
-                    xencall5 -> osdep_hypercall
-                }
+    subgraph cluster_libvmi {
+        label="libvmi/libvmi/"
 
-                subgraph linux_c {
-                    osdep_hypercall -> ioctl
-                }
+        subgraph cluster_driver {
+            label="driver/"
+
+            subgraph cluster_xen {
+                label="xen/"
+
+                subgraph xen_events_private_h {
+                    event_response_conversion[label="int event_response_conversion[]"]
+                } // xen_events_private_h
+                subgraph xen_events_c {
+                    xen_start_single_step
+                    process_response[tooltip="
+Fill vm event response structure (struct vm_event_compat_t).
+Set flags and altp2m index.
+Flags are converted from VMI_EVENT_* to VM_EVENT_*.
+Altp2m index is filled from slat_id.
+                    "]
+                    ring_get_request_and_response_412[tooltip="
+Get address of ring buffer elements for request and response.
+                    "]
+                    ring_get_request_and_response_412->ring_get_request
+                    ring_get_request_and_response_412->ring_get_response
+                    xen_events_listen->process_requests_412[label="xen_events_t->process_requests",style="dotted"]
+                    process_requests_412->ring_get_request_and_response_412
+                    process_requests_412->process_requests
+                    process_requests_412->ring_push_responses
+                    process_requests->process_software_breakpoint[label="xen_events_t->process_event[VM_EVENT_REASON_SOFTWARE_BREAKPOINT]", style="dotted"]
+                    process_software_breakpoint->process_response[label="process_response(vmi_event_t->callback(),...)"]
+                    process_response->event_response_conversion[style="dotted"]
+                } // xen_events_c
             }
-        } // libs
 
-        subgraph cluster_libxc {
-            label="libxc"
+            subgraph driver_interface_h {
+                struct_driver_interface[label="struct driver_interface"]
+            } // driver_interface_h
 
-            subgraph xc_private_h {
-                do_domctl_ -> do_domctl_maybe_retry_efault
-                do_domctl_maybe_retry_efault -> xencall1[label="__HYPERVISOR_domctl"]
-            } // xc_private_h
-        } // libxc
-    } // tools
+            subgraph driver_wrapper_h {
+                driver_start_single_step
+                driver_events_listen
+            } // driver_wrapper_h
+
+            struct_driver_interface->xen_start_single_step[label="start_single_step_ptr", style="dotted"]
+            driver_start_single_step->struct_driver_interface[label="start_single_step_ptr", style="dotted"]
+            driver_events_listen->struct_driver_interface[label="events_listen_ptr", style="dotted"]
+            struct_driver_interface->xen_events_listen[label="events_listen_ptr", style="dotted"]
+        } // driver
+
+        subgraph cluster_accessors_c {
+            label="accessors.c"
+
+            vmi_pause_vm
+            vmi_resume_vm
+        } // accessors_c
+
+        subgraph cluster_events_c {
+            label="events.c"
+
+            register_singlestep_event
+            vmi_register_event->register_singlestep_event
+            vmi_step_event->register_singlestep_event
+            vmi_events_listen->driver_events_listen
+        } // events_c
+
+        subgraph cluster_private_h {
+            label="private.h"
+
+            struct_vmi_instance[label="struct vmi_instance"]
+        } // private_h
+
+        struct_vmi_instance->struct_driver_interface
+        register_singlestep_event->driver_start_single_step
+    } // libvmi
+
+    subgraph cluster_drakvuf {
+        label="drakvuf/src/"
+
+        subgraph cluster_libdrakvuf {
+            label="libdrakvuf/"
+
+            subgraph cluster_vmi_c {
+                label="vmi.c"
+
+                init_vmi->vmi_register_event[label="drakvuf->step_event"]
+                init_vmi->vmi_reset_trap[label="SINGLE_STEP_EVENT(..., callback, ...)", style="dotted"]
+                drakvuf_loop->drakvuf_poll
+                drakvuf_poll->drakvuf_vmi_event_callback
+                drakvuf_vmi_event_callback->vmi_events_listen
+                process_software_breakpoint->int3_cb[label="vmi_event_t->callback", style="dotted"]
+            } // vmi_c
+        } // libdrakvuf
+    } // drakvuf
 
     subgraph cluster_legend {
         label="Legend"
