@@ -1,6 +1,6 @@
 /*
  * Author:        Sergey Kovalev
- * Last modified: 11.12.2019
+ * Last modified: 12.12.2019
  * Agenda:        Call-graph representation of Xen
  * Relates to:    f19af2f1138e89bdf05e8cfcab26a190e3771c4b
  * Keywords:      Xen, call-graph, graphviz
@@ -163,7 +163,7 @@ Toggle the value of 'struct vcpu.arch.hvm.single_step'.
     } // xen
 
     osdep_hypercall -> ioctl
-    ioctl -> vmx_asm_vmexit_handler[label="hypercall", style="dotted"]
+    ioctl -> vmx_asm_vmexit_handler[label="hypercall", style="dashed"]
 
     subgraph cluster_libvmi {
         label="libvmi/libvmi/"
@@ -175,7 +175,7 @@ Toggle the value of 'struct vcpu.arch.hvm.single_step'.
                 label="xen/"
 
                 subgraph xen_events_private_h {
-                    event_response_conversion[label="int event_response_conversion[]"]
+                    event_response_conversion[label="int event_response_conversion[]", shape="rect"]
                 } // xen_events_private_h
                 subgraph xen_events_c {
                     xen_start_single_step
@@ -190,18 +190,18 @@ Get address of ring buffer elements for request and response.
                     "]
                     ring_get_request_and_response_412->ring_get_request
                     ring_get_request_and_response_412->ring_get_response
-                    xen_events_listen->process_requests_412[label="xen_events_t->process_requests",style="dotted"]
+                    xen_events_listen->process_requests_412[label="xen_events_t->process_requests", style="dashed"]
                     process_requests_412->ring_get_request_and_response_412
                     process_requests_412->process_requests
                     process_requests_412->ring_push_responses
-                    process_requests->process_software_breakpoint[label="xen_events_t->process_event[VM_EVENT_REASON_SOFTWARE_BREAKPOINT]", style="dotted"]
+                    process_requests->process_software_breakpoint[label="xen_events_t->process_event[VM_EVENT_REASON_SOFTWARE_BREAKPOINT]", style="dashed"]
                     process_software_breakpoint->process_response[label="process_response(vmi_event_t->callback(),...)"]
                     process_response->event_response_conversion[style="dotted"]
                 } // xen_events_c
             }
 
             subgraph driver_interface_h {
-                struct_driver_interface[label="struct driver_interface"]
+                struct_driver_interface[label="struct driver_interface", shape="rect"]
             } // driver_interface_h
 
             subgraph driver_wrapper_h {
@@ -234,7 +234,7 @@ Get address of ring buffer elements for request and response.
         subgraph cluster_private_h {
             label="private.h"
 
-            struct_vmi_instance[label="struct vmi_instance"]
+            struct_vmi_instance[label="struct vmi_instance", shape="rect"]
         } // private_h
 
         struct_vmi_instance->struct_driver_interface
@@ -255,7 +255,7 @@ Get address of ring buffer elements for request and response.
                 drakvuf_loop->drakvuf_poll
                 drakvuf_poll->drakvuf_vmi_event_callback
                 drakvuf_vmi_event_callback->vmi_events_listen
-                process_software_breakpoint->int3_cb[label="vmi_event_t->callback", style="dotted"]
+                process_software_breakpoint->int3_cb[label="vmi_event_t->callback", style="dashed"]
             } // vmi_c
         } // libdrakvuf
     } // drakvuf
@@ -266,17 +266,19 @@ Get address of ring buffer elements for request and response.
         static_function[label="static function", color="gray"]
         data_structure[label="data structure", shape="rect"]
 
-        a[style="invis"]        
-        b[style="invis"]        
-        c[style="invis"]        
-        d[style="invis"]        
-        e[style="invis"]        
-        f[style="invis"]        
+        a[style="invis"]
+        b[style="invis"]
+        c[style="invis"]
+        d[style="invis"]
+        e[style="invis"]
+        f[style="invis"]
+        g[style="invis"]
+        h[style="invis"]
 
         a -> b
         c -> d[label="indirect call", style="dashed"]
-        e -> f[color="red", label="my experiments"]
-        1 -> 2[label="1 uses address of 2", style="dotted"]
+        e -> f[color="red", label="PoC"]
+        g -> h[label="use address of", style="dotted"]
     } // legend
 }
 
