@@ -1,6 +1,6 @@
 /*
  * Author:        Sergey Kovalev
- * Last modified: 12.12.2019
+ * Last modified: 13.12.2019
  * Agenda:        Call-graph representation of Xen
  * Relates to:    f19af2f1138e89bdf05e8cfcab26a190e3771c4b
  * Keywords:      Xen, call-graph, graphviz
@@ -19,6 +19,12 @@ digraph {
                 subgraph cluster_x86 {
                     label="x86/"
 
+                    subgraph cluster_domctl_c {
+                        label="domctl.c"
+
+                        arch_do_domctl
+                    } // domctl_c
+
                     subgraph cluster_hvm {
                         label="hvm/"
 
@@ -29,11 +35,14 @@ digraph {
                             hvm_hypercall -> hvm_hypercall_table[style="dotted"]
                         } // hypercall_c
 
-                        subgraph hvm_c {
+                        subgraph cluster_hvm_c {
+                            label="hvm.c"
+
+                            hvm_debug_op
                             hvm_toggle_singlestep[tooltip="
 Toggle the value of 'struct vcpu.arch.hvm.single_step'.
                             "]
-                        }
+                        } // hvm_c
 
                         subgraph monitor_c {
                             hvm_monitor_debug
@@ -81,25 +90,37 @@ Toggle the value of 'struct vcpu.arch.hvm.single_step'.
                         label="vm_event.c"
 
                         vm_event_toggle_singlestep -> hvm_toggle_singlestep
+                        vm_event_fast_singlestep
+                        vm_event_fill_regs
                     }
 
-                    hvm_monitor_debug -> vm_event_toggle_singlestep[color="red"]
-                    hvm_monitor_debug -> p2m_altp2m_check[color="red"]
+                    arch_do_domctl -> hvm_debug_op[label="switch (domctl->cmd): case XEN_DOMCTL_debug_on"]
                 } // x86
             } // arch
 
             subgraph cluster_common {
                 label="common/"
 
-                subgraph domctl_c {
+                subgraph cluster_domctl_c {
+                    label="domctl.c"
+
                     do_domctl -> vm_event_domctl[label="XEN_DOMCTL_vm_event_op"]
+                    do_domctl -> arch_do_domctl[label="switch (op->cmd): default"]
                 } // domctl_c
+
+                subgraph cluster_monitor_c {
+                    label="monitor.c"
+
+                    monitor_traps
+                } // monitor_c
 
                 subgraph cluster_vm_event_c {
                     label="vm_event.c"
 
                     vm_event_domctl
                     vm_event_resume[color="gray"]
+                    vm_event_put_request
+                    vm_event_vcpu_pause
 
                     vm_event_domctl -> vm_event_resume
                     vm_event_resume -> vm_event_toggle_singlestep
@@ -124,10 +145,54 @@ Toggle the value of 'struct vcpu.arch.hvm.single_step'.
                             ring_push_responses[label="RING_PUSH_RESPONSES"]
                         } // ring_h
                     } // io
+
+                    subgraph cluster_vm_event_h {
+                        label="vm_event.h"
+
+                        macro_vm_event_fast_singlestep[label="VM_EVENT_FAST_SINGLESTEP", shape="cds"]
+                    } // vm_event_h
                 } // public
+
+                subgraph cluster_xen {
+                    label="xen/"
+
+                    subgraph cluster_sched_h {
+                        label="sched.h"
+
+                        struct_vcpu[label="struct vcpu", shape="rect"]
+                    } // sched_h
+
+                    subgraph cluster_asm_x86 {
+                        label="asm_x86/"
+
+                        subgraph cluster_hvm {
+                            label="hvm/"
+
+                            subgraph vcpu_h {
+                                label="vcpu.h"
+
+                                struct_hvm_vcpu[label="struct hvm_vcpu", shape="rect"]
+                            } // vcpu_h
+                        } // hvm
+
+                        subgraph cluster_domain_h {
+                            label="domain.h"
+
+                            struct_arch_vcpu[label="struct arch_vcpu", shape="rect"]
+                        } // domain_h
+                    } // asm_x86
+
+                    struct_vcpu->struct_arch_vcpu
+                    struct_arch_vcpu->struct_hvm_vcpu
+                } // xen
             } // include
 
             hvm_hypercall_table -> do_domctl[style="dotted", label="HYPERCALL(domctl)"]
+            hvm_toggle_singlestep -> struct_hvm_vcpu[label="hvm_vcpu.single_step"]
+            hvm_monitor_debug -> monitor_traps
+            monitor_traps -> vm_event_fill_regs
+            monitor_traps -> vm_event_put_request
+            monitor_traps -> vm_event_vcpu_pause
         } // xen
 
         subgraph cluster_tools {
@@ -195,7 +260,7 @@ Get address of ring buffer elements for request and response.
                     process_requests_412->process_requests
                     process_requests_412->ring_push_responses
                     process_requests->process_software_breakpoint[label="xen_events_t->process_event[VM_EVENT_REASON_SOFTWARE_BREAKPOINT]", style="dashed"]
-                    process_software_breakpoint->process_response[label="process_response(vmi_event_t->callback(),...)"]
+                    process_software_breakpoint->process_response[label="process_response(vmi_event_t->callback(),vmi_event_t*,vm_event_compat_t*)"]
                     process_response->event_response_conversion[style="dotted"]
                 } // xen_events_c
             }
@@ -256,15 +321,32 @@ Get address of ring buffer elements for request and response.
                 drakvuf_poll->drakvuf_vmi_event_callback
                 drakvuf_vmi_event_callback->vmi_events_listen
                 process_software_breakpoint->int3_cb[label="vmi_event_t->callback", style="dashed"]
+                int3_cb->process_software_breakpoint[label="VMI_EVENT_RESPONSE_TOGGLE_SINGLESTEP | VMI_EVENT_RESPONSE_VMM_PAGETABLE_ID; (OUT event_t *event)->slat_id=0", style="bold"]
             } // vmi_c
         } // libdrakvuf
     } // drakvuf
+
+    subgraph {
+        vm[style="invis"]
+
+        vm -> vmx_asm_vmexit_handler[label="1", tooltip="EXIT_REASON_EXCEPTION_NMI; vector=TRAP_int3", color="blue"]
+        vmx_asm_vmexit_handler -> vmx_vmexit_handler[label="2", color="blue"]
+        vmx_vmexit_handler -> hvm_monitor_debug[label="3", color="blue"]
+        hvm_monitor_debug -> monitor_traps[label="4", tooltip="HVM_MONITOR_SOFTWARE_BREAKPOINT", color="blue"]
+        monitor_traps -> vm_event_vcpu_pause[label="5", color="blue"]
+        monitor_traps -> vm_event_fill_regs[label="6", color="blue"]
+        monitor_traps -> vm_event_put_request[label="7", color="blue"]
+        vmx_asm_vmexit_handler -> drakvuf_poll[label="8", color="blue", style="dashed", tooltip="nvmx_switch_guest()?"]
+        drakvuf_poll -> int3_cb[label="9", color="blue", style="dashed", tooltip="skip obvious part of the path"]
+        
+    } // int3 handling
 
     subgraph cluster_legend {
         label="Legend"
  
         static_function[label="static function", color="gray"]
         data_structure[label="data structure", shape="rect"]
+        macro[label="preprocessor definition", shape="cds"]
 
         a[style="invis"]
         b[style="invis"]
@@ -274,11 +356,16 @@ Get address of ring buffer elements for request and response.
         f[style="invis"]
         g[style="invis"]
         h[style="invis"]
+        i[style="invis"]
+        j[style="invis"]
+        k[style="invis"]
+        l[style="invis"]
 
         a -> b
         c -> d[label="indirect call", style="dashed"]
-        e -> f[color="red", label="PoC"]
         g -> h[label="use address of", style="dotted"]
+        i -> j[label="int3 handling sequence", color="blue"]
+        k -> l[label="return VALUE to" style="bold"]
     } // legend
 }
 
